@@ -56,6 +56,7 @@ module ParallelTests
 
     def run_tests_in_parallel(num_processes, options)
       test_results = nil
+      consolidated_results = {}
 
       run_tests_proc = -> do
         groups = @runner.tests_in_groups(options[:files], num_processes, options)
@@ -66,18 +67,20 @@ module ParallelTests
           num_processes = 1
         end
 
-        report_number_of_tests(groups) unless options[:quiet]
+        report_number_of_tests(groups, consolidated_results) unless options[:quiet]
         test_results = execute_in_parallel(groups, groups.size, options) do |group|
           run_tests(group, groups.index(group), num_processes, options)
         end
-        report_results(test_results, options) unless options[:quiet]
+        report_results(test_results, options, consolidated_results) unless options[:quiet]
       end
 
       if options[:quiet]
         run_tests_proc.call
       else
-        report_time_taken(&run_tests_proc)
+        report_time_taken(consolidated_results, &run_tests_proc)
       end
+
+      write_consolidated_results(consolidated_results, options)
 
       if any_test_failed?(test_results)
         warn final_fail_message
@@ -119,10 +122,11 @@ module ParallelTests
       end
     end
 
-    def report_results(test_results, options)
+    def report_results(test_results, consolidated_results, options)
       results = @runner.find_results(test_results.map { |result| result[:stdout] } * "")
+      @runner.summarize_results(results, consolidated_results)
       puts ""
-      puts @runner.summarize_results(results)
+      puts consolidated_results[:summary][:message]
 
       report_failure_rerun_commmand(test_results, options)
     end
@@ -141,12 +145,27 @@ module ParallelTests
       end
     end
 
-    def report_number_of_tests(groups)
+    def report_number_of_tests(groups, consolidated_results)
       name = @runner.test_file_name
       num_processes = groups.size
       num_tests = groups.map(&:size).sum
       tests_per_process = (num_processes == 0 ? 0 : num_tests / num_processes)
-      puts "#{pluralize(num_processes, 'process')} for #{pluralize(num_tests, name)}, ~ #{pluralize(tests_per_process, name)} per process"
+      message = "#{num_processes} processes for #{num_tests} #{name}s, ~ #{tests_per_process} #{name}s per process"
+      consolidated_results[:tests] = {
+        message: message,
+        tests: num_tests,
+        processes: num_processes,
+        tests_per_process: tests_per_process
+      }
+      puts message
+    end
+
+    def write_consolidated_results(consolidated_results, options)
+      return if options[:consolidated_results].nil? || options[:consolidated_results].empty?
+
+      File.write(options[:consolidated_results], consolidated_results.to_json)
+
+      puts "Wrote consolidated results to #{options[:consolidated_results]}"
     end
 
     def pluralize(n, singular)
@@ -264,6 +283,7 @@ module ParallelTests
         opts.on("--verbose-process-command", "Displays only the command that will be executed by each process") { options[:verbose_process_command] = true }
         opts.on("--verbose-rerun-command", "When there are failures, displays the command executed by each process that failed") { options[:verbose_rerun_command] = true }
         opts.on("--quiet", "Print only tests output") { options[:quiet] = true }
+        opts.on("--consolidated-results [PATH]", "Location to write consolidated test results") { |path| options[:consolidated_results] = path }
         opts.on("-v", "--version", "Show Version") do
           puts ParallelTests::VERSION
           exit 0
@@ -360,9 +380,14 @@ module ParallelTests
       abort if results.any? { |r| r[:exit_status] != 0 }
     end
 
-    def report_time_taken(&block)
+    def report_time_taken(consolidated_results, &block)
       seconds = ParallelTests.delta(&block).to_i
-      puts "\nTook #{seconds} seconds#{detailed_duration(seconds)}"
+      message = "Took #{seconds} seconds#{detailed_duration(seconds)}"
+      consolidated_results[:time_taken] = {
+        seconds: seconds,
+        message: message
+      }
+      puts "\n#{message}"
     end
 
     def detailed_duration(seconds)

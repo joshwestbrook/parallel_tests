@@ -47,7 +47,7 @@ module ParallelTests
         def summarize_results(results)
           sort_order = ['scenario', 'step', 'failed', 'flaky', 'undefined', 'skipped', 'pending', 'passed']
 
-          ['scenario', 'step'].map do |group|
+          message = ['scenario', 'step'].map do |group|
             group_results = results.grep(/^\d+ #{group}/)
             next if group_results.empty?
 
@@ -59,6 +59,12 @@ module ParallelTests
             end
             "#{sums[0]} (#{sums[1..-1].join(", ")})"
           end.compact.join("\n")
+
+          consolidated_results[:summary] = {
+            message: message
+          }
+
+          consolidated_results[:summary][:message]
         end
 
         def cucumber_opts(given)

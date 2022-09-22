@@ -14,8 +14,12 @@ module ParallelTests
         require "parallel_tests"
       end
 
+      def purge_before_load?
+        ENV.fetch('PURGE_BEFORE_LOAD', 'TRUE').downcase == 'false' ? false : true
+      end
+
       def purge_before_load
-        if Gem::Version.new(Rails.version) > Gem::Version.new('4.2.0')
+        if purge_before_load? && Gem::Version.new(Rails.version) > Gem::Version.new('4.2.0')
           Rake::Task.task_defined?('db:purge') ? 'db:purge' : 'app:db:purge'
         end
       end
